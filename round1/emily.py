@@ -138,27 +138,52 @@ class Trader:
         self.ink_pattern = []
         self.ink_window = 20
 
-    def resin_strategy(self, order_depth: OrderDepth, position: int) -> List[Order]:
-        """Stable value strategy with tight spreads"""
+    def resin_strategy(self, order_depth: OrderDepth, fair_value: int, width: int,
+                     position: int, position_limit: int) -> List[Order]:
+        """Generate orders for Rainforest Resin."""
         orders = []
-        best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
-        best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
-        
-        # Fixed fair value for stable asset
-        fair_value = 10000
-        spread = 1
-        
-        if best_ask and best_ask <= fair_value - spread:
-            quantity = min(-order_depth.sell_orders[best_ask], 
-                          self.position_limits["RAINFOREST_RESIN"] - position)
-            orders.append(Order("RAINFOREST_RESIN", best_ask, quantity))
-            
-        if best_bid and best_bid >= fair_value + spread:
-            quantity = min(order_depth.buy_orders[best_bid], 
-                          self.position_limits["RAINFOREST_RESIN"] + position)
-            orders.append(Order("RAINFOREST_RESIN", best_bid, -quantity))
-            
-        return orders
+        buy_order_volume = 0
+        sell_order_volume = 0
+
+        # Check if there are buy and sell orders in the order depth
+        if len(order_depth.sell_orders) == 0 or len(order_depth.buy_orders) == 0:
+            return orders
+
+        # Get best prices from the order book
+        best_ask = min(order_depth.sell_orders.keys())
+        best_bid = max(order_depth.buy_orders.keys())
+
+        # Find prices above/below fair value
+        above_fair = [price for price in order_depth.sell_orders.keys() if price > fair_value + 1]
+        below_fair = [price for price in order_depth.buy_orders.keys() if price < fair_value - 1]
+        best_above_fair = min(above_fair) if len(above_fair) > 0 else fair_value + 2
+        best_below_fair = max(below_fair) if len(below_fair) > 0 else fair_value - 2
+
+        # Take opportunities when price is favorable
+        if best_ask < fair_value - width:
+            best_ask_amount = -1 * order_depth.sell_orders[best_ask]
+            quantity = min(best_ask_amount, position_limit - position)
+            if quantity > 0:
+                orders.append(Order("RAINFOREST_RESIN", best_ask, quantity))
+                buy_order_volume += quantity
+
+        if best_bid > fair_value + width:
+            best_bid_amount = order_depth.buy_orders[best_bid]
+            quantity = min(best_bid_amount, position_limit + position)
+            if quantity > 0:
+                orders.append(Order("RAINFOREST_RESIN", best_bid, -1 * quantity))
+                sell_order_volume += quantity
+
+        # Add market-making orders around the fair value
+        buy_quantity = position_limit - (position + buy_order_volume)
+        if buy_quantity > 0:
+            orders.append(Order("RAINFOREST_RESIN", best_below_fair + 1, buy_quantity))
+
+        sell_quantity = position_limit + (position - sell_order_volume)
+        if sell_quantity > 0:
+            orders.append(Order("RAINFOREST_RESIN", best_above_fair - 1, -sell_quantity))
+
+        return orders    
 
     def kelp_strategy(self, order_depth: OrderDepth, position: int) -> List[Order]:
         """Volatility strategy with dynamic pricing"""
@@ -225,30 +250,38 @@ class Trader:
 
     def run(self, state: TradingState):
         result = {}
-        
-        # Process each product
+
         for product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK"]:
             if product not in state.order_depths:
                 continue
-                
+
             position = state.position.get(product, 0)
             order_depth = state.order_depths[product]
-            
+            orders = []  # Initialize here
+
             if product == "RAINFOREST_RESIN":
-                orders = self.resin_strategy(order_depth, position)
+                position_limit = self.position_limits["RAINFOREST_RESIN"]
+                orders = self.resin_strategy(
+                    order_depth,
+                    10000,
+                    1,
+                    position,
+                    position_limit
+                )
+
             elif product == "KELP":
                 orders = self.kelp_strategy(order_depth, position)
+
             elif product == "SQUID_INK":
                 orders = self.squid_ink_strategy(order_depth, position)
-                
+
             if orders:
-                result[product] = orders
-                
-        # Maintain state between iterations
+                result[product] = orders  # Fixed syntax
+
         trader_data = json.dumps({
             "kelp_prices": self.kelp_prices,
             "squid_ink_prices": self.squid_ink_prices
         })
-        
+
         logger.flush(state, result, 0, trader_data)
         return result, 0, trader_data
