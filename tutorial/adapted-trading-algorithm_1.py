@@ -209,6 +209,7 @@ class Trader:
         best_ask = min(order_depth.sell_orders.keys())
         best_bid = max(order_depth.buy_orders.keys())
         
+<<<<<<< HEAD:tutorial/adapted-trading-algorithm (1).py
         # Calculate mid price
         mid_price = (best_ask + best_bid) / 2
         
@@ -261,6 +262,16 @@ class Trader:
             fair_value = mid_price
             trend_signal = 0
         
+=======
+        # Find MM bid/ask - prices with significant volume
+# In kelp_orders() method:
+        filtered_ask = [p for p in order_depth.sell_orders if abs(order_depth.sell_orders[p]) >= 15]
+        filtered_bid = [p for p in order_depth.buy_orders if abs(order_depth.buy_orders[p]) >= 15]
+        mm_ask = min(filtered_ask) if filtered_ask else best_ask
+        mm_bid = max(filtered_bid) if filtered_bid else best_bid
+        fair_value = (mm_ask + mm_bid) / 2  # Float precision
+            
+>>>>>>> refs/remotes/origin/main:tutorial/adapted-trading-algorithm_1.py
         # Convert to integer
         fair_value_int = int(round(fair_value))
         
@@ -414,10 +425,10 @@ class Trader:
         # Set parameters
         resin_fair_value = 10000  # Fixed fair value for stable Resin
         resin_width = 1  # Small width for Resin due to stability
-        
-        kelp_make_width = 2  # Width for market making on Kelp
-        kelp_take_width = 1  # Width for taking liquidity on Kelp (changed to 1 for integer compatibility)
-        kelp_timespan = 10  # History length to consider
+
+        kelp_make_width = 3.5  # Increased from 2 for better spread capture
+        kelp_take_width = 1.5  # Adjusted from 1 for volatility tolerance
+        kelp_timespan = 15     # Extended from 10 for smoother average
         
         # Load previous state if available
         if state.traderData:

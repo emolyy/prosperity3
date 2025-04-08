@@ -1,0 +1,43 @@
+import math
+
+# rates
+rates = {
+    'Snowballs':     {'Snowballs': 1, 'Pizza': 1.45, 'Nuggets': 0.52, 'SeaShells': 0.72},
+    'Pizza':         {'Snowballs': 0.7, 'Pizza': 1, 'Nuggets': 0.31, 'SeaShells': 0.48},
+    'Nuggets':       {'Snowballs': 1.95, 'Pizza': 3.1, 'Nuggets': 1, 'SeaShells': 1.49},
+    'SeaShells':     {'Snowballs': 1.34, 'Pizza': 1.98, 'Nuggets': 0.64, 'SeaShells': 1}
+}
+
+# weights
+log_rates = {
+    src: {dst: math.log(rate) for dst, rate in dests.items()}
+    for src, dests in rates.items()
+}
+
+# DFS to find best path in 5 trades (6 nodes including start)
+best_path = []
+max_log_value = -math.inf
+
+def dfs(current, path, log_sum, depth):
+    global best_path, max_log_value
+    if depth == 5:
+        if current == 'SeaShells' and log_sum > max_log_value:
+            max_log_value = log_sum
+            best_path = path[:]
+        return
+    for neighbor in log_rates[current]:
+        path.append(neighbor)
+        dfs(neighbor, path, log_sum + log_rates[current][neighbor], depth + 1)
+        path.pop()
+
+# DFS from SeaShells
+dfs('SeaShells', ['SeaShells'], 0, 0)
+
+# convert back from log space
+profit_multiplier = math.exp(max_log_value)
+starting_shells = 500
+final_shells = starting_shells * profit_multiplier
+
+print("Best trading path:", " -> ".join(best_path))
+print(f"Return multiplier: {profit_multiplier:.6f}x")
+print(f"Final SeaShells: {final_shells:.2f} from starting 500")
