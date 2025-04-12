@@ -246,8 +246,8 @@ class Trader:
             self.squid_price_history = []
             self.squid_position_history = []
             self.squid_last_signal = 0
-            self.squid_z_threshold = 2.2  # Z-score threshold for mean reversion signals (increased)
-            self.squid_window_size = 40   # Window size for calculating mean and std dev (increased)
+            self.squid_z_threshold = 2.27  # Z-score threshold for mean reversion signals (increased)
+            self.squid_window_size = 43   # Window size for calculating mean and std dev (increased)
     
             # Add current price to history
         self.squid_price_history.append(mid_price)
