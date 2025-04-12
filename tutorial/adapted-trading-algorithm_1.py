@@ -193,10 +193,10 @@ class Trader:
             orders.append(Order("RAINFOREST_RESIN", best_above_fair - 1, -sell_quantity))
             
         return orders
-        
+
     def kelp_orders(self, order_depth: OrderDepth, timespan: int, make_width: int, 
-                   take_width: int, position: int, position_limit: int) -> List[Order]:
-        """Generate orders for Kelp"""
+               take_width: int, position: int, position_limit: int) -> List[Order]:
+        """Generate orders for Kelp with enhanced trend following"""
         orders = []
         
         buy_order_volume = 0
@@ -209,6 +209,60 @@ class Trader:
         best_ask = min(order_depth.sell_orders.keys())
         best_bid = max(order_depth.buy_orders.keys())
         
+<<<<<<< HEAD:tutorial/adapted-trading-algorithm (1).py
+        # Calculate mid price
+        mid_price = (best_ask + best_bid) / 2
+        
+        # Update price history
+        self.kelp_prices.append(mid_price)
+        
+        # Limit history size
+        if len(self.kelp_prices) > timespan*3:
+            self.kelp_prices = self.kelp_prices[-timespan*3:]
+        
+        # Calculate short and medium EMAs
+        short_period = 5
+        medium_period = 15
+        
+        if len(self.kelp_prices) >= medium_period:
+            # Calculate EMAs
+            short_ema = sum(self.kelp_prices[-short_period:]) / short_period
+            medium_ema = sum(self.kelp_prices[-medium_period:]) / medium_period
+            
+            # Calculate EMA slopes (momentum)
+            if len(self.kelp_prices) >= medium_period + 3:
+                short_ema_prev = sum(self.kelp_prices[-(short_period+3):-3]) / short_period
+                medium_ema_prev = sum(self.kelp_prices[-(medium_period+3):-3]) / medium_period
+                short_slope = short_ema - short_ema_prev
+                medium_slope = medium_ema - medium_ema_prev
+            else:
+                short_slope = 0
+                medium_slope = 0
+            
+            # Determine trend strength and direction
+            trend_signal = 0
+            
+            # Strong uptrend
+            if short_ema > medium_ema and short_slope > 0 and medium_slope > 0:
+                trend_signal = 2
+            # Weak uptrend
+            elif short_ema > medium_ema:
+                trend_signal = 1
+            # Strong downtrend
+            elif short_ema < medium_ema and short_slope < 0 and medium_slope < 0:
+                trend_signal = -2
+            # Weak downtrend
+            elif short_ema < medium_ema:
+                trend_signal = -1
+            
+            # Calculate fair value with trend bias
+            fair_value = mid_price + (trend_signal * 2)
+        else:
+            # Not enough data for trend analysis yet
+            fair_value = mid_price
+            trend_signal = 0
+        
+=======
         # Find MM bid/ask - prices with significant volume
 # In kelp_orders() method:
         filtered_ask = [p for p in order_depth.sell_orders if abs(order_depth.sell_orders[p]) >= 15]
@@ -217,49 +271,115 @@ class Trader:
         mm_bid = max(filtered_bid) if filtered_bid else best_bid
         fair_value = (mm_ask + mm_bid) / 2  # Float precision
             
+>>>>>>> refs/remotes/origin/main:tutorial/adapted-trading-algorithm_1.py
         # Convert to integer
         fair_value_int = int(round(fair_value))
-            
-        # Take all favorable orders
-        if best_ask <= fair_value_int - take_width:
-            ask_amount = -1 * order_depth.sell_orders[best_ask]
-            if ask_amount <= 20:  # Limit size for taking liquidity
-                quantity = min(ask_amount, position_limit - position)
+        
+        # Calculate volatility (to adjust order sizes)
+        if len(self.kelp_prices) >= 10:
+            recent_prices = self.kelp_prices[-10:]
+            volatility = sum([abs(recent_prices[i] - recent_prices[i-1]) for i in range(1, len(recent_prices))]) / 9
+            # Normalize volatility to a scale of 0-1
+            norm_volatility = min(1.0, volatility / 5)
+        else:
+            norm_volatility = 0.5  # Default medium volatility
+        
+        # Adjust order sizes based on volatility and trend
+        # Smaller sizes when volatility is high or trend is weak
+        size_factor = max(0.3, 1.0 - norm_volatility)
+        
+        # Taking orders with trend direction
+        if trend_signal > 0:  # Uptrend - focus on buying dips
+            if best_ask < fair_value_int - take_width:
+                # Price is below fair value in uptrend - good buying opportunity
+                ask_amount = -1 * order_depth.sell_orders[best_ask]
+                # Scale position size based on how far below fair value and trend strength
+                discount = fair_value_int - best_ask
+                size_mult = min(1.0, 0.5 + (discount / 10) + (abs(trend_signal) / 4))
+                max_quantity = int(position_limit * size_mult * size_factor)
+                quantity = min(ask_amount, max_quantity, position_limit - position)
                 if quantity > 0:
                     orders.append(Order("KELP", best_ask, quantity))
                     buy_order_volume += quantity
-                    
-        if best_bid >= fair_value_int + take_width:
-            bid_amount = order_depth.buy_orders[best_bid]
-            if bid_amount <= 20:  # Limit size for taking liquidity
-                quantity = min(bid_amount, position_limit + position)
+    
+        elif trend_signal < 0:  # Downtrend - focus on selling rallies
+            if best_bid > fair_value_int + take_width:
+                # Price is above fair value in downtrend - good selling opportunity
+                bid_amount = order_depth.buy_orders[best_bid]
+                # Scale position size based on how far above fair value and trend strength
+                premium = best_bid - fair_value_int
+                size_mult = min(1.0, 0.5 + (premium / 10) + (abs(trend_signal) / 4))
+                max_quantity = int(position_limit * size_mult * size_factor)
+                quantity = min(bid_amount, max_quantity, position_limit + position)
                 if quantity > 0:
                     orders.append(Order("KELP", best_bid, -1 * quantity))
                     sell_order_volume += quantity
-                    
-        # Add position management orders
-        buy_order_volume, sell_order_volume = self.clear_position_order(
-            orders, order_depth, position, position_limit, "KELP", 
-            buy_order_volume, sell_order_volume, fair_value_int, 2
-        )
+    
+        else:  # No clear trend - market make at fair value
+            # Buy when significantly below fair value
+            if best_ask < fair_value_int - take_width*2:
+                ask_amount = -1 * order_depth.sell_orders[best_ask]
+                quantity = min(ask_amount, int(position_limit * 0.5), position_limit - position)
+                if quantity > 0:
+                    orders.append(Order("KELP", best_ask, quantity))
+                    buy_order_volume += quantity
         
-        # Find prices for market making
-        above_fair = [price for price in order_depth.sell_orders.keys() if price > fair_value_int + 1]
-        below_fair = [price for price in order_depth.buy_orders.keys() if price < fair_value_int - 1]
-        
-        best_above_fair = min(above_fair) if len(above_fair) > 0 else fair_value_int + 2
-        best_below_fair = max(below_fair) if len(below_fair) > 0 else fair_value_int - 2
-        
-        # Add market making orders
-        buy_quantity = position_limit - (position + buy_order_volume)
-        if buy_quantity > 0:
+            # Sell when significantly above fair value
+            if best_bid > fair_value_int + take_width*2:
+                bid_amount = order_depth.buy_orders[best_bid]
+                quantity = min(bid_amount, int(position_limit * 0.5), position_limit + position)
+                if quantity > 0:
+                    orders.append(Order("KELP", best_bid, -1 * quantity))
+                    sell_order_volume += quantity
+    
+        # Risk management - unwind positions that are against the trend
+        if trend_signal < -1 and position > position_limit * 0.3:
+            # Strong downtrend but we're long - reduce position
+            sell_quantity = min(position, int(position_limit * 0.4))
+            if sell_quantity > 0:
+                orders.append(Order("KELP", best_bid, -sell_quantity))
+                sell_order_volume += sell_quantity
+    
+        elif trend_signal > 1 and position < -position_limit * 0.3:
+            # Strong uptrend but we're short - reduce position
+            buy_quantity = min(abs(position), int(position_limit * 0.4))
+            if buy_quantity > 0:
+                orders.append(Order("KELP", best_ask, buy_quantity))
+                buy_order_volume += buy_quantity
+    
+        # Market making with adjusted sizes based on trend
+        above_fair = [price for price in order_depth.sell_orders.keys() if price > fair_value_int]
+        below_fair = [price for price in order_depth.buy_orders.keys() if price < fair_value_int]
+    
+        best_above_fair = min(above_fair) if above_fair else fair_value_int + 2
+        best_below_fair = max(below_fair) if below_fair else fair_value_int - 2
+    
+        # Dynamic order sizes based on trend
+        if trend_signal > 0:
+            # In uptrend, buy more and sell less
+            buy_size = int(15 * (1 + abs(trend_signal)/5))
+            sell_size = int(10 * (1 - abs(trend_signal)/10))
+        elif trend_signal < 0:
+            # In downtrend, sell more and buy less
+            buy_size = int(10 * (1 - abs(trend_signal)/10))
+            sell_size = int(15 * (1 + abs(trend_signal)/5))
+        else:
+            # Neutral trend, balanced sizes
+            buy_size = 12
+            sell_size = 12
+    
+        # Final market making orders
+        remaining_buy = position_limit - (position + buy_order_volume)
+        if remaining_buy > 0:
+            buy_quantity = min(buy_size, remaining_buy)
             orders.append(Order("KELP", best_below_fair + 1, buy_quantity))
-            
-        sell_quantity = position_limit + (position - sell_order_volume)
-        if sell_quantity > 0:
+    
+        remaining_sell = position_limit + (position - sell_order_volume)
+        if remaining_sell > 0:
+            sell_quantity = min(sell_size, remaining_sell)
             orders.append(Order("KELP", best_above_fair - 1, -sell_quantity))
-            
-        return orders
+    
+        return orders    
         
     def clear_position_order(self, orders: List[Order], order_depth: OrderDepth, position: int, 
                             position_limit: int, product: str, buy_order_volume: int, 
