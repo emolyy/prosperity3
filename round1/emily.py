@@ -4,7 +4,6 @@ import statistics
 
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 
-
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -184,33 +183,51 @@ class Trader:
             orders.append(Order("RAINFOREST_RESIN", best_above_fair - 1, -sell_quantity))
 
         return orders    
-
+    
     def kelp_strategy(self, order_depth: OrderDepth, position: int) -> List[Order]:
-        """Volatility strategy with dynamic pricing"""
         orders = []
-        # Calculate VWAP for dynamic pricing
-        if self.kelp_prices:
-            vwap = int(sum(self.kelp_prices[-50:])/len(self.kelp_prices[-50:]))
-        else:
-            vwap = 10000  # Default if no history
-            
         best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
         best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
         
-        spread = 3 # Wider spread for volatile asset
+        if not best_ask or not best_bid:  # Simplified check
+            return orders
         
-        if best_ask and best_ask <= vwap - spread:
-            quantity = min(-order_depth.sell_orders[best_ask], 
-                          self.position_limits["KELP"] - position)
-            orders.append(Order("KELP", best_ask, quantity))
-            
-        if best_bid and best_bid >= vwap + spread:
-            quantity = min(order_depth.buy_orders[best_bid], 
-                          self.position_limits["KELP"] + position)
-            orders.append(Order("KELP", best_bid, -quantity))
-            
+        # NEW: Record market price
+        current_price = (best_ask + best_bid) // 2
+        self.kelp_prices.append(current_price)  # Critical addition
+
+        recent_prices = self.kelp_prices[-20:] if len(self.kelp_prices) >= 20 else self.kelp_prices
+        
+        # Calculate volatility (simplified)
+        price_range = max(recent_prices) - min(recent_prices) if recent_prices else 0
+        volatility = price_range / current_price if current_price != 0 else 0
+        
+        # Dynamic parameters
+        spread = max(2, min(5, int(volatility * current_price)))  # 2-5 price units spread
+        position_size = int(self.position_limits["KELP"] * 0.1)  # 10% of max position per trade
+        
+        # Trading logic - always try to make markets
+        # Buy when price drops below average
+        if best_ask < current_price - spread:
+            buy_qty = min(position_size, self.position_limits["KELP"] - position)
+            if buy_qty > 0:
+                orders.append(Order("KELP", best_ask, buy_qty))
+        
+        # Sell when price rises above average
+        if best_bid > current_price + spread:
+            sell_qty = min(position_size, self.position_limits["KELP"] + position)
+            if sell_qty > 0:
+                orders.append(Order("KELP", best_bid, -sell_qty))
+        
+        # Always maintain basic market making
+        if not orders:  # If no opportunities, provide liquidity
+            if position < self.position_limits["KELP"]:
+                orders.append(Order("KELP", current_price - spread//2, position_size))
+            if position > -self.position_limits["KELP"]:
+                orders.append(Order("KELP", current_price + spread//2, -position_size))
+        
         return orders
-    
+
     def squid_ink_strategy(self, order_depth: OrderDepth, position: int) -> List[Order]:
         orders = []
     

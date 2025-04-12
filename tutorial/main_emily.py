@@ -210,7 +210,7 @@ class Trader:
         best_bid = max(order_depth.buy_orders.keys())
         
         # Find MM bid/ask - prices with significant volume
-# In kelp_orders() method:
+        # In kelp_orders() method:
         filtered_ask = [p for p in order_depth.sell_orders if abs(order_depth.sell_orders[p]) >= 15]
         filtered_bid = [p for p in order_depth.buy_orders if abs(order_depth.buy_orders[p]) >= 15]
         mm_ask = min(filtered_ask) if filtered_ask else best_ask
