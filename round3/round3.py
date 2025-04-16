@@ -4,7 +4,9 @@ from typing import List, Any, Dict
 import jsonpickle
 import numpy as np
 import json
-
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import brentq
 
 class Logger:
     def __init__(self) -> None:
@@ -131,6 +133,12 @@ class Product:
     PICNIC_BASKET1 = "PICNIC_BASKET1"
     PICNIC_BASKET2 = "PICNIC_BASKET2"
     SPREAD = "SPREAD"
+    VOLCANIC_ROCK = "VOLCANIC_ROCK"
+    VOLCANIC_ROCK_VOUCHER_9500 = "VOLCANIC_ROCK_VOUCHER_9500"
+    VOLCANIC_ROCK_VOUCHER_9750 = "VOLCANIC_ROCK_VOUCHER_9750"
+    VOLCANIC_ROCK_VOUCHER_10000 = "VOLCANIC_ROCK_VOUCHER_10000"
+    VOLCANIC_ROCK_VOUCHER_10250 = "VOLCANIC_ROCK_VOUCHER_10250"
+    VOLCANIC_ROCK_VOUCHER_10500 = "VOLCANIC_ROCK_VOUCHER_10500"
 
 BASKETS_PRODUCTS = {
     Product.PICNIC_BASKET1: 
@@ -236,13 +244,19 @@ class Trader:
 
         self.LIMIT = {
             Product.RAINFOREST_RESIN: 50,
-            Product.KELP: 50, 
-            Product.SQUID_INK: 50, 
+            Product.KELP: 50,
+            Product.SQUID_INK: 50,
             Product.CROISSANTS: 250,
-            Product.JAMS:350,
+            Product.JAMS: 350,
             Product.DJEMBES: 60,
             Product.PICNIC_BASKET1: 60,
-            Product.PICNIC_BASKET2: 100
+            Product.PICNIC_BASKET2: 100,
+            'VOLCANIC_ROCK': 400,
+            'VOLCANIC_ROCK_VOUCHER_9500': 200,
+            'VOLCANIC_ROCK_VOUCHER_9750': 200,
+            'VOLCANIC_ROCK_VOUCHER_10000': 200,
+            'VOLCANIC_ROCK_VOUCHER_10250': 200,
+            'VOLCANIC_ROCK_VOUCHER_10500': 200
         }
     def calculate_fair_value(self, product: str, order_depth: OrderDepth, traderObject) -> float:
         if len(order_depth.sell_orders) != 0 and len(order_depth.buy_orders) != 0:
@@ -731,14 +745,346 @@ class Trader:
                             Order(component, max(component_depth.buy_orders.keys()), -quantity * orders_to_place)
                         )
 
+    
+    def black_scholes_call(self, S, K, T, r, sigma):
+        """Calculate Black-Scholes price for a call option."""
+        if T <= 0:
+            return max(0, S - K)
+        
+        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    
+    def implied_volatility(self, price, S, K, T, r):
+        """Calculate implied volatility using the Black-Scholes model."""
+        if price <= 0 or T <= 0:
+            return None
+            
+        # Define the objective function (difference between market and model price)
+        def objective(sigma):
+            return self.black_scholes_call(S, K, T, r, sigma) - price
+        
+        try:
+            # Use brentq method to find the root (implied volatility)
+            return brentq(objective, 0.001, 5.0)
+        except:
+            return None
+    def fit_volatility_smile(self, moneyness_list, iv_list):
+        """Fit a parabolic curve to the volatility smile."""
+        if len(moneyness_list) < 3:
+            return None
+        
+        # Use numpy's polyfit to fit a quadratic function (parabola)
+        coeffs = np.polyfit(moneyness_list, iv_list, 2)
+        return coeffs
+        
+    def evaluate_volatility_smile(self, coeffs, moneyness):
+        """Evaluate the fitted volatility smile at a given moneyness."""
+        if coeffs is None:
+            return None
+        
+        # Evaluate the polynomial at the given moneyness
+        return coeffs[0] * moneyness**2 + coeffs[1] * moneyness + coeffs[2]
+    
+    def trade_volcanic_vouchers(self, state):
+        """Simple and direct implementation to ensure we trade volcanic vouchers."""
+        logger.print("Starting simplified volcanic voucher trading")
+        
+        result = {}
+        
+        # Define all voucher symbols
+        voucher_symbols = [
+            Product.VOLCANIC_ROCK_VOUCHER_9500,
+            Product.VOLCANIC_ROCK_VOUCHER_9750,
+            Product.VOLCANIC_ROCK_VOUCHER_10000,
+            Product.VOLCANIC_ROCK_VOUCHER_10250,
+            Product.VOLCANIC_ROCK_VOUCHER_10500,
+        ]
+        
+        # Get volcanic rock price if available
+        volcanic_rock_price = None
+        if "VOLCANIC_ROCK" in state.order_depths:
+            vr_depth = state.order_depths["VOLCANIC_ROCK"]
+            if vr_depth.buy_orders and vr_depth.sell_orders:
+                best_bid = max(vr_depth.buy_orders.keys())
+                best_ask = min(vr_depth.sell_orders.keys())
+                volcanic_rock_price = (best_bid + best_ask) / 2
+                logger.print(f"VOLCANIC_ROCK price: {volcanic_rock_price}")
+        
+        # Process each voucher
+        for symbol in voucher_symbols:
+            if symbol not in state.order_depths:
+                logger.print(f"{symbol} not in order depths")
+                continue
+            
+            depth = state.order_depths[symbol]
+            if not depth.buy_orders and not depth.sell_orders:
+                logger.print(f"{symbol} has no orders")
+                continue
+            
+            # Get current position
+            position = state.position.get(symbol, 0)
+            logger.print(f"Current position for {symbol}: {position}")
+            
+            orders = []
+            
+            # Simple market making strategy - place orders at both sides
+            if depth.buy_orders:
+                best_bid = max(depth.buy_orders.keys())
+                # Sell if we have room in our position
+                if position > -200:
+                    sell_quantity = min(depth.buy_orders[best_bid], 200 + position)
+                    if sell_quantity > 0:
+                        orders.append(Order(symbol, best_bid, -sell_quantity))
+                        logger.print(f"Selling {sell_quantity} of {symbol} at {best_bid}")
+            
+            if depth.sell_orders:
+                best_ask = min(depth.sell_orders.keys())
+                # Buy if we have room in our position
+                if position < 200:
+                    buy_quantity = min(abs(depth.sell_orders[best_ask]), 200 - position)
+                    if buy_quantity > 0:
+                        orders.append(Order(symbol, best_ask, buy_quantity))
+                        logger.print(f"Buying {buy_quantity} of {symbol} at {best_ask}")
+            
+            if orders:
+                result[symbol] = orders
+        
+        return result
+    
+    def volcanic_rock_strategy(self, state, risk_free_rate=0.01):
+        """Implement trading strategy for Volcanic Rock Vouchers."""
+        # Check if Volcanic Rock is available in the market
+        if 'VOLCANIC_ROCK' not in state.order_depths:
+            return {}
+        
+        # Get the current price of Volcanic Rock
+        volcanic_rock_depth = state.order_depths['VOLCANIC_ROCK']
+        if not volcanic_rock_depth.buy_orders or not volcanic_rock_depth.sell_orders:
+            return {}
+        
+        # Calculate mid price of Volcanic Rock
+        best_bid = max(volcanic_rock_depth.buy_orders.keys())
+        best_ask = min(volcanic_rock_depth.sell_orders.keys())
+        volcanic_rock_price = (best_bid + best_ask) / 2
+        
+        # Calculate days to expiration (assuming we know the current day)
+        # In a real implementation, we would track this based on state.timestamp
+        days_to_expiration = 7 - (state.timestamp // 1000000)  # Rough estimate
+        if days_to_expiration <= 0:
+            days_to_expiration = 0.01  # Small positive value to avoid division by zero
+        
+        # Time to expiration in years (assuming 252 trading days per year)
+        T = days_to_expiration / 252
+        
+        # Collect data for volatility smile fitting
+        moneyness_list = []
+        iv_list = []
+        
+        # Dictionary to store orders
+        voucher_orders = {}
+        
+        # Process each voucher
+        voucher_symbols = [
+            'VOLCANIC_ROCK_VOUCHER_9500',
+            'VOLCANIC_ROCK_VOUCHER_9750',
+            'VOLCANIC_ROCK_VOUCHER_10000',
+            'VOLCANIC_ROCK_VOUCHER_10250',
+            'VOLCANIC_ROCK_VOUCHER_10500'
+        ]
+        
+        strike_prices = {
+            'VOLCANIC_ROCK_VOUCHER_9500': 9500,
+            'VOLCANIC_ROCK_VOUCHER_9750': 9750,
+            'VOLCANIC_ROCK_VOUCHER_10000': 10000,
+            'VOLCANIC_ROCK_VOUCHER_10250': 10250,
+            'VOLCANIC_ROCK_VOUCHER_10500': 10500
+        }
+        
+        # Calculate implied volatilities for each voucher
+        for symbol in voucher_symbols:
+            if symbol not in state.order_depths:
+                continue
+                
+            voucher_depth = state.order_depths[symbol]
+            if not voucher_depth.buy_orders or not voucher_depth.sell_orders:
+                continue
+                
+            # Calculate mid price of the voucher
+            voucher_bid = max(voucher_depth.buy_orders.keys())
+            voucher_ask = min(voucher_depth.sell_orders.keys())
+            voucher_price = (voucher_bid + voucher_ask) / 2
+            
+            # Calculate moneyness
+            strike = strike_prices[symbol]
+            moneyness = np.log(strike / volcanic_rock_price) / np.sqrt(T)
+            
+            # Calculate implied volatility
+            iv = self.implied_volatility(voucher_price, volcanic_rock_price, strike, T, risk_free_rate)
+            
+            if iv is not None:
+                moneyness_list.append(moneyness)
+                iv_list.append(iv)
+        
+        # Fit volatility smile if we have enough data points
+        if len(moneyness_list) >= 3:
+            smile_coeffs = self.fit_volatility_smile(moneyness_list, iv_list)
+            
+            # Trade based on the fitted volatility smile
+            for symbol in voucher_symbols:
+                if symbol not in state.order_depths:
+                    continue
+                    
+                voucher_depth = state.order_depths[symbol]
+                if not voucher_depth.buy_orders or not voucher_depth.sell_orders:
+                    continue
+                    
+                # Get current position
+                position = state.position.get(symbol, 0)
+                
+                # Calculate theoretical price using the fitted volatility smile
+                strike = strike_prices[symbol]
+                moneyness = np.log(strike / volcanic_rock_price) / np.sqrt(T)
+                theoretical_iv = self.evaluate_volatility_smile(smile_coeffs, moneyness)
+                
+                if theoretical_iv is None:
+                    continue
+                    
+                theoretical_price = self.black_scholes_call(
+                    volcanic_rock_price, strike, T, risk_free_rate, theoretical_iv
+                )
+                
+                # Trading logic based on the difference between theoretical and market price
+                best_bid = max(voucher_depth.buy_orders.keys())
+                best_ask = min(voucher_depth.sell_orders.keys())
+                
+                # Define trading thresholds
+                bid_threshold = theoretical_price * 0.98  # 2% below theoretical
+                ask_threshold = theoretical_price * 1.02  # 2% above theoretical
+                
+                orders = []
+                
+                # If market bid is higher than our ask threshold, sell
+                if best_bid > ask_threshold and position > -200:
+                    quantity = min(voucher_depth.buy_orders[best_bid], 200 + position)
+                    if quantity > 0:
+                        orders.append(Order(symbol, best_bid, -quantity))
+                
+                # If market ask is lower than our bid threshold, buy
+                if best_ask < bid_threshold and position < 200:
+                    quantity = min(abs(voucher_depth.sell_orders[best_ask]), 200 - position)
+                    if quantity > 0:
+                        orders.append(Order(symbol, best_ask, quantity))
+                
+                if orders:
+                    voucher_orders[symbol] = orders
+        
+        return voucher_orders
+
+    def analyze_base_iv(self, state, traderObject):
+        """Analyze the base IV (at-the-money implied volatility) over time."""
+        # Calculate current base IV
+        if 'VOLCANIC_ROCK' not in state.order_depths:
+            return
+        
+        volcanic_rock_depth = state.order_depths['VOLCANIC_ROCK']
+        if not volcanic_rock_depth.buy_orders or not volcanic_rock_depth.sell_orders:
+            return
+        
+        # Calculate mid price of Volcanic Rock
+        best_bid = max(volcanic_rock_depth.buy_orders.keys())
+        best_ask = min(volcanic_rock_depth.sell_orders.keys())
+        volcanic_rock_price = (best_bid + best_ask) / 2
+        
+        # Calculate days to expiration
+        days_to_expiration = 7 - (state.timestamp // 1000000)  # Rough estimate
+        if days_to_expiration <= 0:
+            days_to_expiration = 0.01
+        
+        # Time to expiration in years
+        T = days_to_expiration / 252
+        
+        # Find the voucher with strike closest to current price
+        closest_voucher = None
+        min_distance = float('inf')
+        
+        voucher_symbols = [
+            'VOLCANIC_ROCK_VOUCHER_9500',
+            'VOLCANIC_ROCK_VOUCHER_9750',
+            'VOLCANIC_ROCK_VOUCHER_10000',
+            'VOLCANIC_ROCK_VOUCHER_10250',
+            'VOLCANIC_ROCK_VOUCHER_10500'
+        ]
+        
+        strike_prices = {
+            'VOLCANIC_ROCK_VOUCHER_9500': 9500,
+            'VOLCANIC_ROCK_VOUCHER_9750': 9750,
+            'VOLCANIC_ROCK_VOUCHER_10000': 10000,
+            'VOLCANIC_ROCK_VOUCHER_10250': 10250,
+            'VOLCANIC_ROCK_VOUCHER_10500': 10500
+        }
+        
+        for symbol in voucher_symbols:
+            if symbol not in state.order_depths:
+                continue
+            
+            strike = strike_prices[symbol]
+            distance = abs(strike - volcanic_rock_price)
+            
+            if distance < min_distance:
+                min_distance = distance
+                closest_voucher = symbol
+        
+        if closest_voucher is None:
+            return
+        
+        # Calculate IV for the closest voucher
+        voucher_depth = state.order_depths[closest_voucher]
+        if not voucher_depth.buy_orders or not voucher_depth.sell_orders:
+            return
+        
+        voucher_bid = max(voucher_depth.buy_orders.keys())
+        voucher_ask = min(voucher_depth.sell_orders.keys())
+        voucher_price = (voucher_bid + voucher_ask) / 2
+        
+        strike = strike_prices[closest_voucher]
+        iv = self.implied_volatility(voucher_price, volcanic_rock_price, strike, T, 0.01)
+        
+        if iv is None:
+            return
+        
+        # Store base IV history
+        if 'base_iv_history' not in traderObject:
+            traderObject['base_iv_history'] = []
+        
+        traderObject['base_iv_history'].append(iv)
+        
+        # Analyze base IV trend if we have enough data points
+        if len(traderObject['base_iv_history']) >= 5:
+            recent_ivs = traderObject['base_iv_history'][-5:]
+            avg_iv = sum(recent_ivs) / 5
+            
+            # Check if current IV is significantly higher or lower than average
+            if iv > avg_iv * 1.1:  # IV is 10% higher than average
+                traderObject['iv_trend'] = 'high'
+            elif iv < avg_iv * 0.9:  # IV is 10% lower than average
+                traderObject['iv_trend'] = 'low'
+            else:
+                traderObject['iv_trend'] = 'neutral'
+        
+        return traderObject
+
     def run(self, state: TradingState):
         traderObject = {}
         if state.traderData != None and state.traderData != "":
             traderObject = jsonpickle.decode(state.traderData)
         
+        # Analyze base IV and update trader object
+        traderObject = self.analyze_base_iv(state, traderObject) or traderObject
+        
         result = {}
         conversions = 0
-        trader_data = ""
         
         # Add Round 1 products trading
         for product in [Product.RAINFOREST_RESIN, Product.KELP, Product.SQUID_INK]:
@@ -846,9 +1192,16 @@ class Trader:
         # Apply statistical arbitrage
         self.basket_stat_arb(state, Product.PICNIC_BASKET1, BASKET1_PRODS, result)
         self.basket_stat_arb(state, Product.PICNIC_BASKET2, BASKET2_PRODS, result)
+
+        try:
+            volcanic_orders = self.trade_volcanic_vouchers(state)
+            for symbol, orders in volcanic_orders.items():
+                result[symbol] = orders
+        except Exception as e:
+            logger.print(f"Error in volcanic voucher trading: {str(e)}")
         
         # Store trader data
-        trader_data = jsonpickle.encode(traderObject)
-        
+        trader_data = ""
         logger.flush(state, result, conversions, trader_data)
+        
         return result, conversions, trader_data
