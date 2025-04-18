@@ -1,8 +1,20 @@
 from datamodel import Order, TradingState, ConversionObservation
+import json
+
+class Logger:
+    def __init__(self):
+        self.logs = ""
+    
+    def print(self, *objects, sep=" ", end="\n"):
+        self.logs += sep.join([str(o) for o in objects]) + end
+    
+    def flush(self, state):
+        print(json.dumps({"logs": self.logs, "state": state}))
+        self.logs = ""
 
 POSITION_LIMIT = 75
 CONVERSION_LIMIT = 10
-STORAGE_COST = 0.1  # per unit per timestamp
+STORAGE_COST = 0.1  
 PRODUCT = "MAGNIFICENT_MACARONS"
 SYMBOL = "MAGNIFICENT_MACARONS"
 SPREAD_THRESHOLD = 1.0  # derived from robust stats across all days
@@ -15,7 +27,8 @@ def compute_conversion_revenue(obs: ConversionObservation) -> float:
 
 class Trader:
     def __init__(self):
-        self.prev_position = 0  # used to account for holding costs if desired
+        self.prev_position = 0  # holding costs if desired
+        self.logger = Logger()
 
     def run(self, state: TradingState):
         orders = []
@@ -24,32 +37,44 @@ class Trader:
         obs = state.observations.conversionObservations.get(PRODUCT)
 
         if not obs:
-            return {SYMBOL: orders}, conversions_used
+            self.logger.print(f"No observations for {PRODUCT}")
+            result = {SYMBOL: orders}, conversions_used, state.traderData
+            self.logger.flush(result)
+            return result
 
         cost = compute_conversion_cost(obs)
         revenue = compute_conversion_revenue(obs)
+        
+        self.logger.print(f"Position: {pos}, Cost: {cost}, Revenue: {revenue}")
 
         order_depth = state.order_depths.get(SYMBOL)
         if not order_depth:
-            return {SYMBOL: orders}, conversions_used
+            self.logger.print(f"No order depth for {SYMBOL}")
+            result = {SYMBOL: orders}, conversions_used, state.traderData
+            self.logger.flush(result)
+            return result
 
         best_bid = max(order_depth.buy_orders.keys(), default=None)
         best_ask = min(order_depth.sell_orders.keys(), default=None)
+        
+        self.logger.print(f"Best bid: {best_bid}, Best ask: {best_ask}")
 
-        # SELL to market if cost to buy via conversion is cheap
         if best_bid is not None and best_bid - cost >= SPREAD_THRESHOLD:
             qty = min(CONVERSION_LIMIT, POSITION_LIMIT - pos)
             if qty > 0:
                 orders.append(Order(SYMBOL, best_bid, -qty))
                 conversions_used += qty
-                pos += qty  # update simulated position
+                pos += qty
+                self.logger.print(f"Selling {qty} at {best_bid}")
 
-        # BUY from market if conversion revenue is high
         if best_ask is not None and revenue - best_ask >= SPREAD_THRESHOLD:
             qty = min(CONVERSION_LIMIT, pos + POSITION_LIMIT)
             if qty > 0:
                 orders.append(Order(SYMBOL, best_ask, qty))
                 conversions_used += qty
-                pos -= qty  # update simulated position
+                pos -= qty
+                self.logger.print(f"Buying {qty} at {best_ask}")
 
-        return {SYMBOL: orders}, conversions_used
+        result = {SYMBOL: orders}, conversions_used, state.traderData
+        self.logger.flush(result)
+        return result
