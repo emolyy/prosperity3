@@ -111,17 +111,50 @@ class Logger:
     def to_json(self, value: Any) -> str:
         return json.dumps(value, cls=ProsperityEncoder, separators=(",", ":"))
 
-    def truncate(self, value, max_length):
-        # Handle negative max_length values properly
-        if max_length < 0:
-            # Ensure we don't try to slice beyond the string length
-            effective_length = max(0, len(str(value)) + max_length - 3)
-            return str(value)[:effective_length] + "..." if len(str(value)) > abs(max_length) else value
-        
-        # Original logic for positive max_length
-        if len(str(value)) <= max_length:
+    def truncate(self, value, max_length: int) -> str:
+        """
+        Truncates a value to fit within max_length characters when JSON encoded.
+        Ensures the result is valid JSON by using a binary search approach.
+        """
+        # Handle non-string values by converting to string
+        if not isinstance(value, str):
+            value = str(value)
+            
+        # Handle empty values or negative/zero max_length
+        if not value or max_length <= 0:
+            return ""
+            
+        # If the value is already short enough when JSON encoded, return it as is
+        if len(json.dumps(value)) <= max_length:
             return value
-        return str(value)[: max_length - 3] + "..."
+        
+        # Binary search to find the optimal truncation point
+        lo, hi = 0, len(value)
+        result = ""
+        
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            
+            # Try truncating at this position
+            if mid < len(value):
+                candidate = value[:mid] + "..."
+            else:
+                candidate = value
+                
+            # Check if the JSON-encoded candidate fits within max_length
+            try:
+                encoded = json.dumps(candidate)
+                if len(encoded) <= max_length:
+                    result = candidate
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            except:
+                # If JSON encoding fails, try a shorter string
+                hi = mid - 1
+        
+        # If we couldn't find a valid truncation, return an empty string
+        return result if result else ""
 
 logger = Logger()
 
