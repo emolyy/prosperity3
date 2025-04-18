@@ -8,7 +8,7 @@ class Logger:
     def print(self, *objects, sep=" ", end="\n"):
         self.logs += sep.join([str(o) for o in objects]) + end
     
-    def flush(self, state):
+    def flush(self, state=""):
         print(json.dumps({"logs": self.logs, "state": state}))
         self.logs = ""
 
@@ -31,15 +31,19 @@ class Trader:
         self.logger = Logger()
 
     def run(self, state: TradingState):
+        # Initialize empty lists and variables
         orders = []
         conversions_used = 0
         pos = state.position.get(PRODUCT, 0)
         obs = state.observations.conversionObservations.get(PRODUCT)
-
+        
+        # Store trader data for returning later
+        trader_data = state.traderData
+        
         if not obs:
             self.logger.print(f"No observations for {PRODUCT}")
-            result = {SYMBOL: orders}, conversions_used, state.traderData
-            self.logger.flush(result)
+            result = {SYMBOL: orders}, conversions_used, trader_data
+            self.logger.flush(trader_data)
             return result
 
         cost = compute_conversion_cost(obs)
@@ -50,8 +54,8 @@ class Trader:
         order_depth = state.order_depths.get(SYMBOL)
         if not order_depth:
             self.logger.print(f"No order depth for {SYMBOL}")
-            result = {SYMBOL: orders}, conversions_used, state.traderData
-            self.logger.flush(result)
+            result = {SYMBOL: orders}, conversions_used, trader_data
+            self.logger.flush(trader_data)
             return result
 
         best_bid = max(order_depth.buy_orders.keys(), default=None)
@@ -75,6 +79,7 @@ class Trader:
                 pos -= qty
                 self.logger.print(f"Buying {qty} at {best_ask}")
 
-        result = {SYMBOL: orders}, conversions_used, state.traderData
-        self.logger.flush(result)
+        # This must be the last line before returning
+        result = {SYMBOL: orders}, conversions_used, trader_data
+        self.logger.flush(trader_data)
         return result
