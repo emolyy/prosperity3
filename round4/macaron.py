@@ -1,15 +1,42 @@
-from datamodel import Order, TradingState, ConversionObservation
+from datamodel import Symbol, Order, TradingState, ConversionObservation
+from typing import List, Any, Dict
 import json
 
 class Logger:
-    def __init__(self):
+    def __init__(self) -> None:
         self.logs = ""
-    
-    def print(self, *objects, sep=" ", end="\n"):
-        self.logs += sep.join([str(o) for o in objects]) + end
-    
-    def flush(self, state=""):
-        print(json.dumps({"logs": self.logs, "state": state}))
+        self.max_log_length = 3750
+
+    def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
+        self.logs += sep.join(map(str, objects)) + end
+
+    def flush(self, state: TradingState, orders: dict[Symbol, list[Order]], conversions: int, trader_data: str) -> None:
+        base_length = len(
+            self.to_json(
+                [
+                    self.compress_state(state, ""),
+                    self.compress_orders(orders),
+                    conversions,
+                    "",
+                    "",
+                ]
+            )
+        )
+        
+        max_item_length = (self.max_log_length - base_length) // 3
+
+        print(
+            self.to_json(
+                [
+                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+                    self.compress_orders(orders),
+                    conversions,
+                    self.truncate(trader_data, max_item_length),
+                    self.truncate(self.logs, max_item_length),
+                ]
+            )
+        )
+
         self.logs = ""
 
 POSITION_LIMIT = 75
